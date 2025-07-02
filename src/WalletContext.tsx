@@ -639,7 +639,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
       const chain = selectedNetwork;
       const keyDeriver = new KeyDeriver(new PrivateKey(primaryKey));
       const storageManager = new WalletStorageManager(keyDeriver.identityKey);
-      const signer = new WalletSigner(chain, keyDeriver, storageManager);
+      const signer = new WalletSigner(chain, keyDeriver as any, storageManager);
       const services = new Services(chain);
       const wallet = new Wallet(signer, services, undefined, privilegedKeyManager);
       newManagers.settingsManager = wallet.settingsManager;
@@ -754,8 +754,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
           adminOriginator,
           buildWallet,
           new OverlayUMPTokenInteractor(
-            resolver,
-            broadcaster
+            (resolver as any),
+            (broadcaster as any)
           ),
           recoveryKeySaver,
           passwordRetriever,
@@ -922,6 +922,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
     certificateRequests,
     protocolRequests,
     spendingRequests,
+    groupPermissionRequests,
     advanceBasketQueue,
     advanceCertificateQueue,
     advanceProtocolQueue,

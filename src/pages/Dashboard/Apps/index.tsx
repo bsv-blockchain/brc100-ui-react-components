@@ -3,8 +3,6 @@ import React, {
   useState,
   useRef,
   ChangeEvent,
-  FocusEvent,
-  MouseEvent,
   useContext
 } from 'react'
 import {
@@ -13,11 +11,14 @@ import {
   TextField,
   LinearProgress,
   FormControl,
+  Button
 } from '@mui/material'
 import Grid2 from '@mui/material/Grid2'
-import { makeStyles, useTheme } from '@mui/styles'
+import { makeStyles } from '@mui/styles'
 import SearchIcon from '@mui/icons-material/Search'
+import ExploreIcon from '@mui/icons-material/Explore'
 import Fuse from 'fuse.js'
+import { useHistory } from 'react-router-dom'
 
 import style from './style'
 import MetanetApp from '../../../components/MetanetApp'
@@ -39,8 +40,9 @@ const useStyles = makeStyles(style, {
 
 const Apps: React.FC = () => {
   const classes = useStyles()
+  const history = useHistory()
 
-  // State
+  // State for local apps only
   const [apps, setApps] = useState<AppData[]>([])
   const [filteredApps, setFilteredApps] = useState<AppData[]>([])
   const [fuseInstance, setFuseInstance] = useState<Fuse<AppData> | null>(null)
@@ -63,33 +65,51 @@ const Apps: React.FC = () => {
 
   const { managers, adminOriginator } = useContext(WalletContext)
 
-  // Handler for changes in the search TextField
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setSearch(value)
 
-    if (value === '') {
-      setFilteredApps(apps)
+    // Apply search immediately, with or without Fuse
+    applySearch(value, apps, fuseInstance)
+  }
+
+  // Separate function to apply search logic
+  const applySearch = (searchValue: string, appList: AppData[], fuse: Fuse<AppData> | null) => {
+    if (searchValue === '') {
+      setFilteredApps(appList)
       return
     }
-    if (fuseInstance) {
-      const results = fuseInstance.search(value).map(match => match.item)
-      setFilteredApps(results)
+
+    if (fuse) {
+      // Use Fuse for fuzzy search when available
+      const results = fuse.search(searchValue)
+      setFilteredApps(results.map(result => result.item))
+    } else {
+      // Fallback to simple string matching when Fuse isn't ready
+      const filtered = appList.filter(app =>
+        app.appName.toLowerCase().includes(searchValue.toLowerCase()) ||
+        app.domain.toLowerCase().includes(searchValue.toLowerCase())
+      )
+      setFilteredApps(filtered)
     }
   }
 
-  // Support the search field expand animation
-  const handleSearchFocus = (e: FocusEvent<HTMLInputElement>) => {
+  const handleFocus = () => {
     setIsExpanded(true)
   }
 
-  const handleSearchBlur = (e: FocusEvent<HTMLInputElement>) => {
+  const handleBlur = () => {
     setIsExpanded(false)
   }
 
-  const handleIconClick = (e: MouseEvent<SVGSVGElement>) => {
-    setIsExpanded(true)
-    inputRef.current?.focus()
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus()
+    }
+  }
+
+  const handleViewCatalog = () => {
+    history.push('/dashboard/app-catalog')
   }
 
   // Resolve additional data (icon, name) for each domain
@@ -140,7 +160,8 @@ const Apps: React.FC = () => {
 
           if (parsedAppData) {
             setApps(parsedAppData)
-            setFilteredApps(parsedAppData)
+            // Apply current search to cached data (without Fuse initially)
+            applySearch(search, parsedAppData, null)
           } else {
             setLoading(true)
           }
@@ -154,11 +175,12 @@ const Apps: React.FC = () => {
           window.localStorage.setItem(cachedAppsKey, JSON.stringify(parsedAppData))
 
           setApps(parsedAppData)
-          setFilteredApps(parsedAppData)
-
           // Initialize Fuse
           const fuse = new Fuse(parsedAppData, options)
           setFuseInstance(fuse)
+          // Re-apply current search with new data and Fuse instance
+          applySearch(search, parsedAppData, fuse)
+
         } catch (error) {
           console.error(error)
         }
@@ -183,15 +205,30 @@ const Apps: React.FC = () => {
         <Typography variant="body1" color="textSecondary" sx={{ mb: 2 }}>
           Browse and manage your application permissions.
         </Typography>
-        <FormControl sx={{ width: '100%' }}>
+
+        {/* View App Catalog Button */}
+        <Button
+          variant="outlined"
+          startIcon={<ExploreIcon />}
+          onClick={handleViewCatalog}
+          sx={{ mb: 2 }}
+        >
+          View App Catalog
+        </Button>
+
+        <FormControl sx={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
           <TextField
             variant='outlined'
-            fullWidth
             value={search}
             onChange={handleSearchChange}
             placeholder='Search'
-            onFocus={handleSearchFocus}
-            onBlur={handleSearchBlur}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
             inputRef={inputRef}
             slotProps={{
               input: {
@@ -226,7 +263,7 @@ const Apps: React.FC = () => {
         }}
       >
         {loading && 'Loading your apps...'}
-        {!loading && apps.length === 0 && 'You have no apps yet.'}
+        {!loading && apps.length === 0 && 'You have no recent apps yet.'}
         {!loading && apps.length !== 0 && filteredApps.length === 0 && 'No apps match your search.'}
       </Typography>
 
