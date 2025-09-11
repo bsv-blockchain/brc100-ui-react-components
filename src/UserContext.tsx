@@ -7,6 +7,7 @@ export interface NativeHandlers {
     onFocusRequested: () => Promise<void>;
     onFocusRelinquished: () => Promise<void>;
     onDownloadFile: (fileData: Blob, fileName: string) => Promise<boolean>;
+    requestAppManifest: (url: string) => Promise<Object>;
 }
 
 // Default no-op implementations for Tauri functions
