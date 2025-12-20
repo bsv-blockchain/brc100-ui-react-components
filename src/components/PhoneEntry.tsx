@@ -1,4 +1,4 @@
-import { forwardRef, useState, useEffect } from 'react'
+import { forwardRef, useState, useEffect, useRef } from 'react'
 import { 
   TextField, 
   FormControl, 
@@ -73,14 +73,20 @@ const PhoneEntry = forwardRef<HTMLDivElement, PhoneEntryProps>((props, ref) => {
   const [isValid, setIsValid] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Track whether user explicitly picked a country to prevent auto-reset
+  const userPickedCountry = useRef(false)
+
   // Initialize from the provided value if any
   useEffect(() => {
     if (value) {
       try {
         const phoneInfo = parsePhoneNumberFromString(value);
         if (phoneInfo) {
-          setCountry(phoneInfo.country || 'US');
-          setPhoneNumber(phoneInfo.nationalNumber);
+          // Only auto-set country if user hasn't explicitly chosen one
+          if (!userPickedCountry.current && phoneInfo.country) {
+            setCountry(phoneInfo.country)
+          }
+          setPhoneNumber(phoneInfo.nationalNumber)
         }
       } catch (error) {
         console.error('Error parsing phone number:', error);
@@ -134,7 +140,10 @@ const PhoneEntry = forwardRef<HTMLDivElement, PhoneEntryProps>((props, ref) => {
               labelId="country-select-label"
               id="country-select"
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
+              onChange={e => {
+                setCountry(e.target.value as string)
+                userPickedCountry.current = true
+              }}
               label="Country"
             >
               <MenuItem disabled value="">
