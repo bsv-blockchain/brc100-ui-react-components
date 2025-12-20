@@ -24,6 +24,11 @@ interface PageHeaderProps {
   showButton?: boolean
   showBackButton?: boolean
   onBackClick?: () => void
+  // Optional secondary action button
+  showSecondaryButton?: boolean
+  secondaryButtonTitle?: string
+  secondaryButtonIcon?: React.ReactNode
+  onSecondaryClick?: () => void
 }
 
 const PageHeader: FC<PageHeaderProps> = ({
@@ -37,14 +42,18 @@ const PageHeader: FC<PageHeaderProps> = ({
   showButton = true,
   showBackButton = true,
   onBackClick,
+  showSecondaryButton = false,
+  secondaryButtonTitle,
+  secondaryButtonIcon,
+  onSecondaryClick,
 }) => {
   const classes = useStyles()
 
   return (
     <div>
       <div className={(classes as any).top_grid}>
-        {showBackButton && (
-          <div>
+        <div>
+          {showBackButton && (
             <IconButton
               className={(classes as any).back_button}
               onClick={onBackClick || (() => history.go(-1))}
@@ -52,8 +61,8 @@ const PageHeader: FC<PageHeaderProps> = ({
             >
               <ArrowBack />
             </IconButton>
-          </div>
-        )}
+          )}
+        </div>
         <div>
           <Img
             className={(classes as any).app_icon}
@@ -73,6 +82,19 @@ const PageHeader: FC<PageHeaderProps> = ({
           )}
         </div>
         <div>
+          {showSecondaryButton && secondaryButtonTitle && (
+            <Button
+              className={(classes as any).action_button}
+              variant="outlined"
+              color="primary"
+              size="large"
+              startIcon={secondaryButtonIcon}
+              onClick={onSecondaryClick}
+              sx={{ mr: showButton ? 1 : 0 }}
+            >
+              {secondaryButtonTitle}
+            </Button>
+          )}
           {showButton && (
             <Button
               className={(classes as any).action_button}

@@ -9,14 +9,17 @@ import {
   Card,
   Modal,
   IconButton,
-  FormControl
+  FormControl,
+  Button
 } from '@mui/material'
 import Grid2 from '@mui/material/Grid2'
 import { makeStyles } from '@mui/styles'
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import HistoryIcon from '@mui/icons-material/History'
 import CloseIcon from '@mui/icons-material/Close'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import Fuse from 'fuse.js'
 import { useHistory } from 'react-router-dom'
 import { Img } from '@bsv/uhrp-react'
@@ -55,6 +58,8 @@ const AppCatalog: React.FC = () => {
   const [openModal, setOpenModal] = useState(false)
   const [modalImage, setModalImage] = useState<string>('')
   const [isExpanded, setIsExpanded] = useState<boolean>(false)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -68,22 +73,73 @@ const AppCatalog: React.FC = () => {
     keys: ['metadata.name', 'metadata.description', 'metadata.tags', 'metadata.category']
   }
 
-  // Load catalog apps
-  const loadCatalogApps = async () => {
-    setCatalogLoading(true)
+  // Simple localStorage caching (stale-while-revalidate)
+  const CACHE_KEY = 'app_catalog_cache_v1'
+  const CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
+
+  const readCache = (): { ts: number, apps: PublishedApp[] } | null => {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || !Array.isArray(parsed.apps)) return null
+      return { ts: parsed.ts || 0, apps: parsed.apps as PublishedApp[] }
+    } catch {
+      return null
+    }
+  }
+
+  const writeCache = (apps: PublishedApp[]) => {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), apps }))
+      setLastUpdated(Date.now())
+    } catch (err) {
+      // ignore quota errors
+    }
+  }
+
+  const hydrateFromApps = (apps: PublishedApp[]) => {
+    setCatalogApps(apps)
+    setFilteredCatalogApps(apps)
+    const fuse = new Fuse(apps, options)
+    setFuseInstance(fuse)
+  }
+
+  const fetchCatalog = async (): Promise<PublishedApp[] | null> => {
     try {
       const catalog = new AppCatalogAPI({})
       const apps = await catalog.findApps()
-      setCatalogApps(apps)
-      setFilteredCatalogApps(apps)
-
-      // Initialize Fuse instance
-      const fuse = new Fuse(apps, options)
-      setFuseInstance(fuse)
+      writeCache(apps)
+      return apps
     } catch (error) {
       console.error('Failed to load catalog apps:', error)
+      return null
     }
+  }
+
+  // Load catalog apps with cache & background refresh
+  const loadCatalogApps = async () => {
+    const cached = readCache()
+    if (cached) {
+      hydrateFromApps(cached.apps)
+      setLastUpdated(cached.ts)
+      setCatalogLoading(false)
+      // Only refresh if cache is stale
+      const isStale = Date.now() - cached.ts > CACHE_TTL_MS
+      if (isStale) {
+        setIsRefreshing(true)
+        const fresh = await fetchCatalog()
+        setIsRefreshing(false)
+        if (fresh) hydrateFromApps(fresh)
+      }
+      return
+    }
+
+    // No cache — show loading spinner and fetch
+    setCatalogLoading(true)
+    const fresh = await fetchCatalog()
     setCatalogLoading(false)
+    if (fresh) hydrateFromApps(fresh)
   }
 
   // Handle search
@@ -129,7 +185,7 @@ const AppCatalog: React.FC = () => {
 
   // Handle back navigation from catalog to apps page
   const handleBackToApps = () => {
-    history.push('/dashboard/apps')
+    history.push('/dashboard/recent-apps')
   }
 
   const handleNavigateToApp = () => {
@@ -147,6 +203,13 @@ const AppCatalog: React.FC = () => {
     loadCatalogApps()
   }, [])
 
+  const handleRefreshClick = async () => {
+    setIsRefreshing(true)
+    const fresh = await fetchCatalog()
+    setIsRefreshing(false)
+    if (fresh) hydrateFromApps(fresh)
+  }
+
   return (
     <div className={classes.root}>
       {currentView === 'list' && (
@@ -161,12 +224,31 @@ const AppCatalog: React.FC = () => {
               openUrl('https://metanetapps.com')
             }}
             history={history}
-            showBackButton={true}
+            showBackButton={false}
             showButton={true}
+            showSecondaryButton={true}
+            secondaryButtonTitle="Recent Apps"
+            secondaryButtonIcon={<HistoryIcon />}
+            onSecondaryClick={handleBackToApps}
             onBackClick={handleBackToApps}
           />
 
           <Container>
+            {/* Cache status and manual refresh */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="caption" color="textSecondary">
+                {lastUpdated ? `Last updated: ${new Date(lastUpdated).toLocaleString()}` : 'Loading...'}
+              </Typography>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<RefreshIcon />}
+                onClick={handleRefreshClick}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            </Box>
             {/* Search */}
             <Box sx={{ mb: 3, display: 'flex', justifyContent: 'flex-start' }}>
               <FormControl sx={{

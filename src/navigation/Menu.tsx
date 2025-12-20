@@ -120,7 +120,6 @@ export default function Menu({ menuOpen, setMenuOpen, menuRef }: MenuProps) {
 
   useEffect(() => {
     let cancelled = false
-    debugger
     const run = async () => {
       if (!managers?.walletManager || !activeProfile?.name) return
       const cacheKey = `funds_${activeProfile.name}`
@@ -369,6 +368,8 @@ export default function Menu({ menuOpen, setMenuOpen, menuRef }: MenuProps) {
     refreshProfiles()
   }, [refreshProfiles])
 
+  const isAppsSelected = history.location.pathname === '/dashboard/apps' || history.location.pathname === '/dashboard/recent-apps'
+
   return (
     <Drawer
       anchor='left'
@@ -530,17 +531,17 @@ export default function Menu({ menuOpen, setMenuOpen, menuRef }: MenuProps) {
         <List component="nav" sx={{ mb: 2 }}>
           <ListItemButton
             onClick={() => navigation.push('/dashboard/apps')}
-            selected={history.location.pathname === '/dashboard/apps'}
-            sx={menuItemStyle(history.location.pathname === '/dashboard/apps')}
+            selected={isAppsSelected}
+            sx={menuItemStyle(isAppsSelected)}
           >
-            <ListItemIcon sx={{ minWidth: 40, color: history.location.pathname === '/dashboard/apps' ? 'primary.main' : 'inherit' }}>
+            <ListItemIcon sx={{ minWidth: 40, color: isAppsSelected ? 'primary.main' : 'inherit' }}>
               <BrowseIcon />
             </ListItemIcon>
             <ListItemText
               primary={
                 <Typography
                   variant="body1"
-                  fontWeight={history.location.pathname === '/dashboard/apps' ? 600 : 400}
+                  fontWeight={isAppsSelected ? 600 : 400}
                 >
                   Apps
                 </Typography>

@@ -1,4 +1,4 @@
-import { useState, useContext, useRef } from 'react';
+import { useState, useContext, useRef, useCallback, useMemo, forwardRef, useEffect } from 'react';
 import { useBreakpoint } from '../../utils/useBreakpoints';
 import { Switch, Route, Redirect } from 'react-router-dom';
 import style from '../../navigation/style';
@@ -6,8 +6,15 @@ import { makeStyles } from '@mui/styles';
 import {
   Typography,
   IconButton,
-  Toolbar
+  Toolbar,
+  Button,
+  DialogActions,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Box,
 } from '@mui/material';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import PageLoading from '../../components/PageLoading';
 import Menu from '../../navigation/Menu';
 import { Menu as MenuIcon } from '@mui/icons-material';
@@ -28,6 +35,8 @@ import ProtocolAccess from './ProtocolAccess'; // Assuming index.jsx or similar
 import CounterpartyAccess from './CounterpartyAccess'; // Assuming index.jsx or similar
 import CertificateAccess from './CertificateAccess'; // Assuming index.jsx or similar
 import { WalletContext } from '../../WalletContext';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { Slide, toast } from 'react-toastify';
 // @ts-expect-error - Type issues with makeStyles
 const useStyles = makeStyles(style, {
   name: 'Dashboard'
@@ -46,7 +55,9 @@ export default function Dashboard() {
   // TODO: Fetch actual identity key instead of hardcoding 'self'
   const profileKey = String(activeProfile?.id ?? activeProfile?.name ?? 'none')
   const [myIdentityKey] = useState('self');
-
+  const [redirectOpen, setRedirectOpen] = useState(false)
+  type RedirectAppInfo = { name: string; Originator: string; custom_message?: string }
+  const [redirectApp, setRedirectApp] = useState<RedirectAppInfo | null>(null)
   const getMargin = () => {
     if (menuOpen && !breakpoints.sm) {
       // Adjust margin based on Menu width if needed
@@ -58,6 +69,46 @@ export default function Dashboard() {
   if (!pageLoaded) {
     return <PageLoading />;
   }
+  const redirectDomain = useMemo(() => {
+    if (!redirectApp?.Originator) return ''
+    try {
+      return new URL(redirectApp.Originator).host
+    } catch {
+      return redirectApp.Originator
+    }
+  }, [redirectApp])
+  
+  useEffect(() => {
+    try{
+      const appinfo = sessionStorage.getItem('appinfo')
+      if (!appinfo) return
+      const parsed = JSON.parse(appinfo)
+      setRedirectApp(parsed)
+      setRedirectOpen(true)
+    }
+    catch{}
+    finally{
+      sessionStorage.removeItem('appinfo')
+    }
+  }, [])
+  
+
+  // continue handler
+  const handleRedirectContinue = useCallback(() => {
+    const url = redirectApp?.Originator
+    // Close any open modals/dialogs immediately
+    setRedirectOpen(false)
+    if (!url) return
+
+    // Defer opening the URL until after the dialog has unmounted to avoid any overlay/focus issues
+    setTimeout(() => {
+      try {
+        openUrl(url)
+      } catch {
+        toast.error('Failed to open app')
+      }
+    }, 0)
+  }, [redirectApp])
 
   return (
     <div key={profileKey} className={classes.content_wrap} style={{ marginLeft: getMargin(), transition: 'margin 0.3s ease' }}>
@@ -66,6 +117,97 @@ export default function Dashboard() {
         width: menuOpen ? `calc(100vw - ${getMargin()})` : '100vw',
         transition: 'width 0.3s ease, margin 0.3s ease'
       }}>
+        {redirectOpen && (
+        <Dialog
+          open
+          onClose={() => { try { sessionStorage.removeItem('appinfo') } catch {}; setRedirectOpen(false) }}
+          fullWidth
+          maxWidth="sm"
+          disableEnforceFocus
+          disableScrollLock
+        >
+          <DialogTitle sx={{ fontWeight: 700 }}>
+            Continue to {redirectApp?.name}?
+          </DialogTitle>
+
+          <DialogContent dividers>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 1 }}>
+              {/* Optional: show the app tile if you want */}
+              <Box
+                sx={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: 'action.hover',
+                  flexShrink: 0,
+                }}
+              >
+              {redirectDomain ? (
+                <img
+                  src={`https://${redirectDomain}/favicon.ico`}
+                  alt={`${redirectApp?.name} icon`}
+                  style={{ maxWidth: '100%', maxHeight: '100%' }}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : null}
+            </Box>
+
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                sx={{
+                  fontWeight: 700,
+                  fontSize: '1.1rem',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {redirectApp?.name}
+              </Typography>
+
+              {redirectApp?.custom_message && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{
+                    mt: 0.5,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {redirectApp.custom_message}
+                </Typography>
+              )}
+
+              {redirectDomain && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  {redirectDomain}
+                </Typography>
+              )}
+            </Box>
+          </Box>
+          </DialogContent>
+
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button onClick={() => { try { sessionStorage.removeItem('appinfo') } catch {}; setRedirectOpen(false) }} color="inherit">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRedirectContinue}
+              variant="contained"
+              endIcon={<OpenInNewIcon />}
+            >
+              Continue
+            </Button>
+          </DialogActions>
+        </Dialog>
+              )}
         {breakpoints.sm &&
           <div style={{ padding: '0.5em 0 0 0.5em' }} ref={menuRef}>
             <Toolbar>
@@ -115,11 +257,12 @@ export default function Dashboard() {
           />
           <Route
             path='/dashboard/apps'
-            component={Apps}
-          />
-          <Route
-            path='/dashboard/app-catalog'
             component={AppCatalog}
+          />
+          <Redirect from='/dashboard/app-catalog' to='/dashboard/apps' />
+          <Route
+            path='/dashboard/recent-apps'
+            component={Apps}
           />
           <Route
             path='/dashboard/app' // Consider if this needs /:app parameter

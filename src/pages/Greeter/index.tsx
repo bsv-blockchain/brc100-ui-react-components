@@ -1,8 +1,11 @@
-import { useContext, useState, useRef, useCallback, useEffect } from 'react'
+import { useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
+  AppBar,
+  Toolbar,
   Typography,
   Button,
   TextField,
+  Skeleton,
   CircularProgress,
   Divider,
   InputAdornment,
@@ -25,6 +28,9 @@ import {
   Visibility,
   VisibilityOff,
   CheckCircle as CheckCircleIcon,
+  ChevronLeft,
+  ChevronRight,
+  Close as CloseIcon,
 } from '@mui/icons-material'
 import PhoneEntry from '../../components/PhoneEntry.js'
 import AppLogo from '../../components/AppLogo'
@@ -35,8 +41,9 @@ import PageLoading from '../../components/PageLoading.js'
 import { Utils } from '@bsv/sdk'
 import { Link as RouterLink } from 'react-router-dom'
 import WalletConfig from '../../components/WalletConfig.js'
-
-// Helper functions for the Stepper will be defined inside the component
+import { getAppCatalogApps } from '../../utils/appCatalogCache'
+import type { PublishedApp } from '../../utils/appCatalogCache'
+import MetanetApp from '../../components/MetanetApp'
 
 // Phone form component to reduce cognitive complexity
 const PhoneForm = ({ phone, setPhone, loading, handleSubmitPhone, phoneFieldRef }) => {
@@ -47,22 +54,14 @@ const PhoneForm = ({ phone, setPhone, loading, handleSubmitPhone, phoneFieldRef 
         value={phone}
         onChange={setPhone}
         ref={phoneFieldRef}
-        sx={{
-          width: '100%',
-          mb: 2
-        }}
+        sx={{ width: '100%', mb: 2 }}
       />
       <Button
         variant='contained'
         type='submit'
         disabled={loading || !phone || phone.length < 10}
         fullWidth
-        sx={{ 
-          mt: 2,
-          borderRadius: theme.shape.borderRadius,
-          textTransform: 'none',
-          py: 1.2
-        }}
+        sx={{ mt: 2, borderRadius: theme.shape.borderRadius, textTransform: 'none', py: 1.2 }}
       >
         {loading ? <CircularProgress size={24} /> : 'Continue'}
       </Button>
@@ -207,20 +206,14 @@ const PasswordForm = ({ password, setPassword, confirmPassword, setConfirmPasswo
             input: {
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton
-                    aria-label="toggle password visibility"
-                    onClick={() => setShowPassword(!showPassword)}
-                    edge="end"
-                  >
+                  <IconButton aria-label="toggle password visibility" onClick={() => setShowPassword(!showPassword)} edge="end">
                     {showPassword ? <VisibilityOff /> : <Visibility />}
                   </IconButton>
                 </InputAdornment>
               ),
             }
           }}
-          sx={{ 
-            mb: 2
-          }}
+          sx={{ mb: 2 }}
         />
       )}
 
@@ -229,12 +222,7 @@ const PasswordForm = ({ password, setPassword, confirmPassword, setConfirmPasswo
         type='submit'
         disabled={loading || !password || (accountStatus === 'new-user' && !confirmPassword)}
         fullWidth
-        sx={{
-          borderRadius: theme.shape.borderRadius,
-          mt: 2,
-          textTransform: 'none',
-          py: 1.2
-        }}
+        sx={{ borderRadius: theme.shape.borderRadius, mt: 2, textTransform: 'none', py: 1.2 }}
       >
         {loading ? <CircularProgress size={24} /> : (accountStatus === 'new-user' ? 'Create Account' : 'Login')}
       </Button>
@@ -248,36 +236,152 @@ const Greeter: React.FC<any> = ({ history }) => {
   const { appVersion, appName, pageLoaded } = useContext(UserContext)
   const theme = useTheme()
 
+  // Banner/new user state
+  const [welcomeUser, setWelcomeUser] = useState(false)
+  const [appInfo, setAppinfo] = useState<any | null>(null)
+  const [recommendedApps, setRecommendedApps] = useState<PublishedApp[]>([])
+  const [recommendedLoading, setRecommendedLoading] = useState<boolean>(false)
+  const [devSimulateApp, setDevSimulateApp] = useState<boolean>(false)
+
+  // --- Slider refs/state (auto-rotate + controls) ---
+  const railRef = useRef<HTMLDivElement | null>(null)
+  const [paused, setPaused] = useState(false)
+  const pausedRef = useRef(false)
+  const setPausedBoth = useCallback((v: boolean) => { pausedRef.current = v; setPaused(v) }, [])
+  const BELT_SPEED_PX_PER_SEC = 100; // belt speed
+  const segWidthRef = useRef(0);
+  const rAFRef = useRef<number | null>(null);
+  const scrollByAmount = useCallback((dir: 'left' | 'right') => {
+    const el = railRef.current
+    if (!el) return
+    const first = el.firstElementChild as HTMLElement | null
+    const tile = first?.offsetWidth ?? 110
+    const gap = 16
+    const step = tile + gap
+    el.scrollBy({ left: dir === 'left' ? -step : step, behavior: 'smooth' })
+  }, [])
+  const beltItems = useMemo(() => {
+    if (!recommendedApps?.length) return [];
+    return [...recommendedApps, ...recommendedApps];
+  }, [recommendedApps]);
+  
+useEffect(() => {
+  if (appInfo) return; // only run on explore view
+  const el = railRef.current;
+  if (!el) return;
+
+  // measure one segment (the width of the first half = original list)
+  const measure = () => {
+    const children = Array.from(el.children) as HTMLElement[];
+    const half = Math.floor(children.length / 2);
+    if (!half) return;
+    const first = children[0];
+    const last = children[half - 1];
+    segWidthRef.current = (last.offsetLeft + last.offsetWidth) - first.offsetLeft;
+  };
+
+  // measure once the DOM is ready
+  const id = requestAnimationFrame(measure);
+
+  let last = performance.now();
+  const step = (ts: number) => {
+    if (!railRef.current) return;
+    const dt = Math.min(0.05, (ts - last) / 1000); // clamp dt for stability
+    last = ts;
+
+    if (!pausedRef.current && segWidthRef.current > 0) {
+      el.scrollLeft += BELT_SPEED_PX_PER_SEC * dt;
+
+      // wrap seamlessly when we pass one segment
+      const seg = segWidthRef.current;
+      if (el.scrollLeft >= seg) {
+        // jump back by exactly one segment with no animation
+        const prev = el.style.scrollBehavior;
+        el.style.scrollBehavior = 'auto';
+        el.scrollLeft -= seg;
+        el.style.scrollBehavior = prev || '';
+      }
+    }
+    rAFRef.current = requestAnimationFrame(step);
+  };
+
+  rAFRef.current = requestAnimationFrame(step);
+
+  // keep wrapping when user drags/scrolls manually too
+  const onScroll = () => {
+    const seg = segWidthRef.current;
+    if (!seg) return;
+    if (el.scrollLeft >= seg) {
+      const prev = el.style.scrollBehavior;
+      el.style.scrollBehavior = 'auto';
+      el.scrollLeft -= seg;
+      el.style.scrollBehavior = prev || '';
+    } else if (el.scrollLeft < 0) {
+      const prev = el.style.scrollBehavior;
+      el.style.scrollBehavior = 'auto';
+      el.scrollLeft += seg;
+      el.style.scrollBehavior = prev || '';
+    }
+  };
+  el.addEventListener('scroll', onScroll, { passive: true });
+
+  return () => {
+    cancelAnimationFrame(id);
+    if (rAFRef.current) cancelAnimationFrame(rAFRef.current);
+    rAFRef.current = null;
+    el.removeEventListener('scroll', onScroll);
+  };
+}, [appInfo, beltItems.length]);
+
+  // Check sessionStorage for 'appinfo' once on mount
+  const loadRecommendedApps = useCallback(async () => {
+    try {
+      setRecommendedLoading(true)
+      const apps = await getAppCatalogApps()
+      setRecommendedApps(apps) // let the slider overflow naturally
+    } catch (err) {
+      // ignore errors quietly for greeter suggestions
+    } finally {
+      setRecommendedLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      const appinfo = sessionStorage.getItem('appinfo')
+      if (appinfo) {
+        setWelcomeUser(true)
+        setAppinfo(JSON.parse(appinfo))
+      } else {
+        loadRecommendedApps()
+      }
+    } catch (err) {
+      loadRecommendedApps()
+    }
+  }, [loadRecommendedApps])
+
+  // Derive selected app display info (domain, icon) for header
+  const selectedApp = useMemo(() => {
+    const src = (appInfo as any)?.Originator || (appInfo as any)?.redirected_from
+    let domain = ''
+    if (typeof src === 'string') {
+      try { domain = new URL(src).host } catch { domain = '' }
+    }
+    const name = (appInfo as any)?.name || domain
+    const icon = typeof src === 'string' ? src.replace(/\/$/, '') + '/favicon.ico' : undefined
+    return { domain: domain || name || '', name, icon }
+  }, [appInfo])
+
   const viewToStepIndex = useWab ? { phone: 0, code: 1, password: 2 } : { presentation: 0, password: 1 }
   const steps = useWab
     ? [
-        {
-          label: 'Phone Number',
-          icon: <PhoneIcon />,
-          description: 'Enter your phone number for verification'
-        },
-        {
-          label: 'Verification Code',
-          icon: <SMSIcon />,
-          description: 'Enter the code you received via SMS'
-        },
-        {
-          label: 'Password',
-          icon: <LockIcon />,
-          description: 'Enter your password'
-        }
+        { label: 'Phone Number', icon: <PhoneIcon />, description: 'Enter your phone number for verification' },
+        { label: 'Verification Code', icon: <SMSIcon />, description: 'Enter the code you received via SMS' },
+        { label: 'Password', icon: <LockIcon />, description: 'Enter your password' }
       ]
     : [
-        {
-          label: 'Presentation Key',
-          icon: <KeyIcon />,
-          description: 'Paste your presentation key'
-        },
-        {
-          label: 'Password',
-          icon: <LockIcon />,
-          description: 'Enter your password'
-        }
+        { label: 'Presentation Key', icon: <KeyIcon />, description: 'Paste your presentation key' },
+        { label: 'Password', icon: <LockIcon />, description: 'Enter your password' }
       ]
 
   const [step, setStep] = useState(useWab ? 'phone' : 'presentation')
@@ -406,12 +510,6 @@ const Greeter: React.FC<any> = ({ history }) => {
       return
     }
 
-    // If new-user, confirm password match
-    if (accountStatus === 'new-user' && password !== confirmPassword) {
-      toast.error("Passwords don't match.")
-      return
-    }
-
     setLoading(true)
     try {
       await walletManager.providePassword(password)
@@ -430,181 +528,373 @@ const Greeter: React.FC<any> = ({ history }) => {
     } finally {
       setLoading(false)
     }
-  }, [walletManager, password, confirmPassword])
+  }, [walletManager, password, confirmPassword, accountStatus, history])
 
   if (!pageLoaded) {
     return <PageLoading />
   }
 
+  // Common tile size based on the 15vh banner height (prevents vertical overflow)
+  const tileSize = 'min(1000px, calc(15vh - 16px))'
+
   return (
-    <Container maxWidth="sm" sx={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <Paper 
-        elevation={4} 
-        sx={{ 
-          p: 4, 
-          borderRadius: 2,
-          bgcolor: 'background.paper',
-          boxShadow: theme.shadows[3]
-        }}
-      >
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 4 }}>
-          <Box sx={{ mb: 2, width: '100px', height: '100px' }}>
-            <AppLogo
-              rotate
-              size="100px"
-              color="#2196F3"
-            />
-          </Box>
-          <Typography 
-            variant='h2' 
-            fontFamily='Helvetica' 
-            fontSize='2em'
+    <>
+      {/* === APP BAR with auto-rotating movie slider (no overlap with right side) === */}
+      <AppBar position="fixed" color="primary" elevation={0} sx={{ height: '15vh' }}>
+        <Toolbar disableGutters sx={{ height: '15vh', px: 2, overflow: 'hidden', '--banner-h': '15vh', }}>
+          <Box
             sx={{
-              mb: 1,
-              fontWeight: 'bold',
-              background: theme.palette.mode === 'dark' 
-                ? 'linear-gradient(90deg, #FFFFFF 0%, #F5F5F5 100%)'
-                : 'linear-gradient(90deg, #2196F3 0%, #4569E5 100%)',
-              backgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
+              display: 'grid',
+              gridTemplateColumns: '10fr auto', // main content | right button
+              alignItems: 'center',
+              columnGap: 5,
+              width: '100%',
+              height: '100%',
+              minWidth: 0
             }}
           >
-            {appName}
-          </Typography>
-          <Typography 
-            variant="body1"
-            color="text.secondary"
-            align="center"
-            sx={{ mb: 3 }}
-          >
-            Secure BSV Blockchain Wallet
-          </Typography>
-          <Divider sx={{ width: '80%' }} />
-          <Typography 
-            variant="caption"
-            color="text.secondary"
-            align="center"
-            sx={{ mt: 1 }}
-          >
-            <i>v{appVersion}</i>
-          </Typography>
-        </Box>
-
-        <WalletConfig />
-        
-        {/* Authentication Stepper - replaces Accordions for clearer progression */}
-        {configStatus === 'configured' && (
-          <Stepper activeStep={viewToStepIndex[step]} orientation="vertical">
-          {steps.map((step, index) => (
-            <Step key={step.label}>
-              <StepLabel 
-                icon={step.icon}
-                optional={
-                  <Typography variant="caption" color="text.secondary">
-                    {step.description}
-                  </Typography>
-                }
+            {/* MAIN CONTENT */}
+            {appInfo ? (
+              // appInfo exists: single tile + title/message (LEFT-ALIGNED, VERT-CENTERED)
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridAutoFlow: 'column',
+                  gridAutoColumns: 'auto 1fr',
+                  alignItems: 'center',
+                  columnGap: 2,
+                  minWidth: 0,
+                  height: '100%',
+                }}
               >
-                <Typography variant="body2" fontWeight={500}>
-                  {step.label}
-                </Typography>
-              </StepLabel>
-              <StepContent>
-                {index === 0 && (
-                  useWab ? (
-                    <PhoneForm
-                      phone={phone}
-                      setPhone={setPhone}
-                      loading={loading}
-                      handleSubmitPhone={handleSubmitPhone}
-                      phoneFieldRef={phoneFieldRef}
-                    />
-                  ) : (
-                    <PresentationKeyForm
-                      presentationKey={presentationKey}
-                      setPresentationKey={setPresentationKey}
-                      loading={loading}
-                      handleSubmitPresentationKey={handleSubmitPresentationKey}
-                      presentationKeyFieldRef={presentationKeyFieldRef}
-                    />
-                  )
-                )}
-
-                {useWab && index === 1 && (
-                  <CodeForm
-                    code={code}
-                    setCode={setCode}
-                    loading={loading}
-                    handleSubmitCode={handleSubmitCode}
-                    handleResendCode={handleResendCode}
-                    codeFieldRef={codeFieldRef}
+                {/* Tile to match explore vibe */}
+                <Box
+                  sx={{
+                    width: tileSize,
+                    height: tileSize,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                    '& img, & svg': { display: 'block', maxHeight: '100%', width: 'auto', objectFit: 'contain' }
+                  }}
+                >
+                  <MetanetApp
+                    appName={''}
+                    domain={''}
+                    iconImageUrl={selectedApp.icon || (selectedApp.domain ? `https://${selectedApp.domain}/favicon.ico` : undefined)}
+                    clickable={false}
                   />
-                )}
+                </Box>
 
-                {(useWab ? index === 2 : index === 1) && (
-                  <PasswordForm
-                    password={password}
-                    setPassword={setPassword}
-                    confirmPassword={confirmPassword}
-                    setConfirmPassword={setConfirmPassword}
-                    showPassword={showPassword}
-                    setShowPassword={setShowPassword}
-                    loading={loading}
-                    handleSubmitPassword={handleSubmitPassword}
-                    accountStatus={accountStatus}
-                    passwordFieldRef={passwordFieldRef}
-                  />
-                )}
-              </StepContent>
-            </Step>
-          ))}
-          </Stepper>
-        )}
+                {/* Title + message */}
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography
+                  variant="h4"
+                  sx={{
+                    color: 'inherit',
+                    fontWeight: 700,
+                    // min 1.1rem, fluid center = 18% of banner height, max 1.9rem
+                    fontSize: 'clamp(1.1rem, calc(var(--banner-h) * 0.18), 1.9rem)',
+                    lineHeight: 1.2,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    textAlign: 'left',
+                  }}
+                  >
+                  {appInfo?.name}
+                  </Typography>
 
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
-          <RouterLink to='/recovery' style={{ textDecoration: 'none' }}>
-            <Button 
-              variant="text" 
-              color='secondary'
-              size="small"
-              startIcon={<RestoreIcon />}
+                  {(appInfo?.message || (appInfo as any)?.custom_message) && (
+                    <Typography
+                      variant="body1"
+                      sx={{
+                        color: 'inherit',
+                        opacity: 0.9,
+                        // min 0.9rem, fluid center = 12% of banner height, max 1.2rem
+                        fontSize: 'clamp(0.9rem, calc(var(--banner-h) * 0.12), 1.2rem)',
+                        lineHeight: 1.35,
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical',
+                        WebkitLineClamp: 3, // show up to 3 lines in the 15vh banner
+                        overflow: 'hidden',
+                        textAlign: 'left',
+                      }}
+                    >
+                      {appInfo?.message || (appInfo as any)?.custom_message}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            ) : (
+              // no appInfo: MOVIE SLIDER (scroll-snap, auto-rotate, touch/trackpad friendly)
+              <Box
+              sx={{
+                height: '100%',
+                display: 'grid',
+                gridTemplateColumns: 'auto minmax(0,1fr) auto', // [left btn] [rail] [right btn]
+                alignItems: 'center',
+                columnGap: 1,
+                minWidth: 0,
+                zIndex: 0,
+              }}
+              onMouseEnter={() => setPausedBoth?.(true)}
+              onMouseLeave={() => setPausedBoth?.(false)}
+              onTouchStart={() => setPausedBoth?.(true)}
+              onTouchEnd={() => setTimeout(() => setPausedBoth?.(false), 800)}
+              onFocusCapture={() => setPausedBoth?.(true)}
+              onBlurCapture={() => setPausedBoth?.(false)}
             >
-              Account Recovery
-            </Button>
-          </RouterLink>
-        </Box>
+              {/* LEFT chevron (outside the rail) */}
+              <IconButton
+                size="small"
+                onClick={() => scrollByAmount('left')}
+                sx={{
+                  justifySelf: 'start',
+                  ml: -0.5,                       // optional outward nudge; remove if you want flush
+                  background: 'rgba(0,0,0,0.15)',
+                }}
+              >
+                <ChevronLeft />
+              </IconButton>
 
-        <Typography
-          variant='caption'
-          color='textSecondary'
-          align='center'
-          sx={{ 
-            display: 'block',
-            mt: 3,
-            mb: 1,
-            fontSize: '0.75rem',
-            opacity: 0.7
-          }}
-        >
-          By using this software, you acknowledge that you have read, understood and accepted the terms of the{' '}
-          <a
-            href='https://github.com/bitcoin-sv/metanet-desktop/blob/master/LICENSE.txt'
-            target='_blank'
-            rel='noopener noreferrer'
-            onClick={(e) => {
-              // Prevent default behavior for the link
-              e.preventDefault()
-              // In a browser environment, this will work as expected
-              // In Tauri, this will be handled by the configured shell handler
-              window.open('https://github.com/bitcoin-sv/metanet-desktop/blob/master/LICENSE.txt', '_blank', 'noopener,noreferrer')
-            }}
-            style={{ color: theme.palette.primary.main, textDecoration: 'none' }}
+              {/* Scrollable rail */}
+              <Box
+                  ref={railRef}
+                  sx={{
+                    width: '100%',
+                    overflowX: 'auto',
+                    overflowY: 'hidden',
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none',
+                    '&::-webkit-scrollbar': { display: 'none' },
+                    display: 'grid',
+                    gridAutoFlow: 'column',
+                    gridAutoColumns: tileSize,
+                    columnGap: 10,          // 16px
+                    alignItems: 'center',
+                    px: 4,
+                    height: '100%',
+                    // IMPORTANT: no scrollSnapType for continuous belt
+                  }}
+                >
+                  {recommendedLoading
+                    ? Array.from({ length: Math.max(10, beltItems.length) }).map((_, i) => (
+                        <Skeleton
+                          key={`s-${i}`}
+                          variant="rounded"
+                          sx={{
+                            width: tileSize,
+                            height: tileSize,
+                            bgcolor: 'rgba(255,255,255,0.15)',
+                            borderRadius: 2,
+                          }}
+                        />
+                      ))
+                    : beltItems.map((ra, idx) => (
+                        <Box key={`${ra.token?.txid ?? ra.metadata?.name}-${idx}`}>
+                          <MetanetApp
+                            appName={ra.metadata.name}
+                            domain={ra.metadata.domain || ra.metadata.name}
+                            iconImageUrl={ra.metadata.icon || (ra.metadata.domain ? `https://${ra.metadata.domain}/favicon.ico` : undefined)}
+                            clickable
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const name = ra.metadata.name;
+                              const domain = ra.metadata.domain;
+                              const origin = domain ? `https://${domain}` : undefined;
+                              const sim = {
+                                name,
+                                ...(origin ? { Originator: origin } : {}),
+                                custom_message: `${ra.metadata.description}`
+                              } as any;
+                              try {
+                                sessionStorage.removeItem('appinfo_handled')
+                                sessionStorage.setItem('appinfo', JSON.stringify(sim))
+                              } catch {}
+                              setAppinfo(sim);
+                              setWelcomeUser(true);
+                              setPausedBoth(true);
+                            }}
+                          />
+                        </Box>
+                      ))}
+                </Box>
+              {/* RIGHT chevron (outside the rail) */}
+              <IconButton
+                size="small"
+                onClick={() => scrollByAmount('right')}
+                sx={{
+                  justifySelf: 'end',
+                  mr: -0.5,                       // symmetric outward nudge
+                  background: 'rgba(0,0,0,0.15)',
+                }}
+              >
+                <ChevronRight />
+              </IconButton>
+            </Box>
+            )}
+
+            {/* RIGHT COLUMN: Clear (X) button when an app is selected */}
+            {appInfo ? (
+              <Box sx={{ justifySelf: 'end' }}>
+                <IconButton
+                  aria-label="Clear selected app"
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    try { sessionStorage.removeItem('appinfo') } catch {}
+                    setAppinfo(null)
+                    setWelcomeUser(false)
+                    setPausedBoth(false)
+                    loadRecommendedApps()
+                  }}
+                >
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+            ) : (
+              <Box />
+            )}
+
+          </Box>
+        </Toolbar>
+      </AppBar>
+      {/* === END APP BAR === */}
+
+      <Container maxWidth="sm" sx={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', pt: '15vh' }}>
+        <Paper elevation={4} sx={{ p: 4, borderRadius: 2, bgcolor: 'background.paper', boxShadow: theme.shadows[3] }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 4 }}>
+            <Box sx={{ mb: 2, width: '100px', height: '100px' }}>
+              <AppLogo rotate size="100px" color="#2196F3" />
+            </Box>
+            <Typography
+              variant='h2'
+              fontFamily='Helvetica'
+              fontSize='2em'
+              textAlign='center'
+              sx={{
+                mb: 1,
+                fontWeight: 'bold',
+                background: theme.palette.mode === 'dark'
+                  ? 'linear-gradient(90deg, #FFFFFF 0%, #F5F5F5 100%)'
+                  : 'linear-gradient(90deg, #2196F3 0%, #4569E5 100%)',
+                backgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}
+            >
+              {appInfo?.name ? (
+                <>
+                  Continue to {appInfo.name} on the 
+                  <br />
+                  {appName}
+                </>
+              ) : (
+                <>Explore apps on the 
+                  <br />
+                  {appName}</>
+              )}
+            </Typography>
+          </Box>
+
+          <WalletConfig />
+
+          {/* Authentication Stepper */}
+          {configStatus === 'configured' && (
+            <Stepper activeStep={viewToStepIndex[step]} orientation="vertical">
+              {steps.map((step, index) => (
+                <Step key={step.label}>
+                  <StepLabel
+                    icon={step.icon}
+                    optional={<Typography variant="caption" color="text.secondary">{step.description}</Typography>}
+                  >
+                    <Typography variant="body2" fontWeight={500}>{step.label}</Typography>
+                  </StepLabel>
+                  <StepContent>
+                    {index === 0 && (
+                      useWab ? (
+                        <PhoneForm
+                          phone={phone}
+                          setPhone={setPhone}
+                          loading={loading}
+                          handleSubmitPhone={handleSubmitPhone}
+                          phoneFieldRef={phoneFieldRef}
+                        />
+                      ) : (
+                        <PresentationKeyForm
+                          presentationKey={presentationKey}
+                          setPresentationKey={setPresentationKey}
+                          loading={loading}
+                          handleSubmitPresentationKey={handleSubmitPresentationKey}
+                          presentationKeyFieldRef={presentationKeyFieldRef}
+                        />
+                      )
+                    )}
+
+                    {useWab && index === 1 && (
+                      <CodeForm
+                        code={code}
+                        setCode={setCode}
+                        loading={loading}
+                        handleSubmitCode={handleSubmitCode}
+                        handleResendCode={handleResendCode}
+                        codeFieldRef={codeFieldRef}
+                      />
+                    )}
+
+                    {(useWab ? index === 2 : index === 1) && (
+                      <PasswordForm
+                        password={password}
+                        setPassword={setPassword}
+                        confirmPassword={confirmPassword}
+                        setConfirmPassword={setConfirmPassword}
+                        showPassword={showPassword}
+                        setShowPassword={setShowPassword}
+                        loading={loading}
+                        handleSubmitPassword={handleSubmitPassword}
+                        accountStatus={accountStatus}
+                        passwordFieldRef={passwordFieldRef}
+                      />
+                    )}
+                  </StepContent>
+                </Step>
+              ))}
+            </Stepper>
+          )}
+
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
+            <RouterLink to='/recovery' style={{ textDecoration: 'none' }}>
+              <Button variant="text" color='secondary' size="small" startIcon={<RestoreIcon />}>
+                Account Recovery
+              </Button>
+            </RouterLink>
+          </Box>
+          <Typography
+            variant='caption'
+            color='textSecondary'
+            align='center'
+            sx={{ display: 'block', mt: 3, mb: 1, fontSize: '0.75rem', opacity: 0.7 }}
           >
-            Software License
-          </a>.
-        </Typography>
-      </Paper>
-    </Container>
+            By using this software, you acknowledge that you have read, understood and accepted the terms of the{' '}
+            <a
+              href='https://github.com/bitcoin-sv/metanet-desktop/blob/master/LICENSE.txt'
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={(e) => {
+                e.preventDefault()
+                window.open('https://github.com/bitcoin-sv/metanet-desktop/blob/master/LICENSE.txt', '_blank', 'noopener,noreferrer')
+              }}
+              style={{ color: theme.palette.primary.main, textDecoration: 'none' }}
+            >
+              Software License
+            </a>.
+          </Typography>
+        </Paper>
+      </Container>
+    </>
   )
 }
 

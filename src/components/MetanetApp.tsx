@@ -13,6 +13,8 @@ interface MetanetAppProps extends RouteComponentProps {
   appName?: string
   onClick?: (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => void
   clickable?: boolean
+  variant?: 'default' | 'plain'
+  hideLabel?: boolean
 }
 
 const MetanetApp: React.FC<MetanetAppProps> = ({
@@ -22,6 +24,8 @@ const MetanetApp: React.FC<MetanetAppProps> = ({
   history,
   onClick,
   clickable = true,
+  variant = 'default',
+  hideLabel = false,
 }) => {
   const theme = useTheme()
 
@@ -53,82 +57,55 @@ const MetanetApp: React.FC<MetanetAppProps> = ({
     }
   }
 
-  return (
-    <Card
-      sx={{
-        cursor: clickable ? 'pointer' : 'default',
-        boxShadow: 'none',
-        textAlign: 'center',
-        display: 'flex',
-        flexDirection: 'column', // Stack items vertically
-        height: '100%', // Fill the container height
-        width: '100%',
-        // Responsive card width
-        maxWidth: {
-          xs: '100px', // Smaller on mobile
-          sm: '110px', // Medium on tablets
-          md: '130px', // Larger on desktop
-          lg: '140px', // Even larger on big screens
-          xl: '150px', // Extra large screens
-        },
-        justifyContent: 'center',
-        transition: 'background 0.3s ease',
-        backgroundColor: 'transparent',
-        backgroundImage: 'none',
-        margin: '0 auto', // Center the card
-        '&:hover': {
-          backgroundColor: (theme as any).palette.action?.hover || 'rgba(0, 0, 0, 0.04)'
-        },
-      }}
-      onClick={handleClick}
-    >
-      <CardContent>
-        <div>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              paddingTop: '0.4em',
-              // Responsive container sizing
-              width: {
-                xs: '48px',  // Smaller on mobile
-                sm: '56px',  // Medium on tablets
-                md: '72px',  // Larger on desktop
-                lg: '80px',  // Even larger on big screens
-                xl: '84px',  // Extra large screens
-              },
-              height: {
-                xs: '48px',
-                sm: '56px',
-                md: '72px',
-                lg: '80px',
-                xl: '84px',
-              },
-              maxWidth: '96px',  // Increased maximum size
-              maxHeight: '96px',
-              margin: '0 auto',
-            }}
-          >
-            <Img
-              src={iconImageUrl}
-              alt={displayName}
-              style={{
-                objectFit: 'contain',
-                width: '100%',
-                height: '100%',
-              }}
-            />
-          </Box>
-        </div>
-        {/*
-          TODO: Remove references to webkit once browsers mature to a good level
-        */}
+  const content = (
+    <>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          // Responsive container sizing
+          width: {
+            xs: '48px',  // Smaller on mobile
+            sm: '56px',  // Medium on tablets
+            md: '72px',  // Larger on desktop
+            lg: '80px',  // Even larger on big screens
+            xl: '84px',  // Extra large screens
+          },
+          height: {
+            xs: '48px',
+            sm: '56px',
+            md: '72px',
+            lg: '80px',
+            xl: '84px',
+          },
+          maxWidth: '96px',
+          maxHeight: '96px',
+          margin: '0 auto',
+        }}
+      >
+        <Img
+          src={iconImageUrl}
+          alt={displayName}
+          style={{
+            objectFit: 'contain',
+            width: '100%',
+            height: '100%',
+            borderRadius: '8px'
+          }}
+          onError={(e) => {
+            try {
+              (e.target as HTMLImageElement).src = 'https://metanetapps.com/favicon.ico'
+            } catch {}
+          }}
+        />
+      </Box>
+      {!hideLabel && (
         <Typography
           variant="body2"
           sx={{
             color: (theme as any).palette.text?.primary || 'inherit',
-            paddingTop: '0.4em',
+            mt: 0.5,
             display: '-webkit-box',
             overflow: 'hidden',
             WebkitBoxOrient: 'vertical',
@@ -144,8 +121,70 @@ const MetanetApp: React.FC<MetanetAppProps> = ({
         >
           {displayName}
         </Typography>
-      </CardContent>
-    </Card>
+      )}
+    </>
+  )
+
+  return (
+    variant === 'plain' ? (
+      <Box
+        sx={{
+          cursor: clickable ? 'pointer' : 'default',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          width: '100%',
+          maxWidth: {
+            xs: '100px',
+            sm: '110px',
+            md: '130px',
+            lg: '140px',
+            xl: '150px',
+          },
+          justifyContent: 'center',
+          alignItems: 'center',
+          background: 'transparent',
+          margin: '0 auto',
+        }}
+        onClick={handleClick}
+      >
+        {content}
+      </Box>
+    ) : (
+      <Card
+        sx={{
+          cursor: clickable ? 'pointer' : 'default',
+          boxShadow: 'none',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column', // Stack items vertically
+          height: '100%', // Fill the container height
+          width: '100%',
+          // Responsive card width
+          maxWidth: {
+            xs: '100px', // Smaller on mobile
+            sm: '110px', // Medium on tablets
+            md: '130px', // Larger on desktop
+            lg: '140px', // Even larger on big screens
+            xl: '150px', // Extra large screens
+          },
+          justifyContent: 'center',
+          transition: 'background 0.3s ease',
+          backgroundColor: 'transparent',
+          backgroundImage: 'none',
+          margin: '0 auto', // Center the card
+          '&:hover': {
+            backgroundColor: (theme as any).palette.action?.hover || 'rgba(0, 0, 0, 0.04)'
+          },
+        }}
+        onClick={handleClick}
+      >
+        <CardContent sx={{ py: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          {content}
+        </CardContent>
+      </Card>
+    )
   )
 }
 
