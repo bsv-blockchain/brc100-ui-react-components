@@ -1,11 +1,12 @@
-import { useState, useContext, useEffect } from 'react'
+import { useState, useContext, useEffect, useCallback } from 'react'
 import {
   Typography,
   LinearProgress,
   Box,
   Paper,
   Button,
-  useTheme
+  useTheme,
+  TextField
 } from '@mui/material'
 import Grid from '@mui/material/Grid'
 import { makeStyles } from '@mui/styles'
@@ -17,6 +18,7 @@ import LightModeImage from "../../../images/lightMode"
 import ComputerIcon from '@mui/icons-material/Computer'
 import { UserContext } from '../../../UserContext'
 import PageLoading from '../../../components/PageLoading.js'
+import { StorageClient, WalletStorageManager } from '@bsv/wallet-toolbox-client'
 
 const useStyles = makeStyles((theme: Theme) => ({
   root: {
@@ -62,7 +64,7 @@ const useStyles = makeStyles((theme: Theme) => ({
 
 const Settings = () => {
   const classes = useStyles()
-  const { settings, updateSettings } = useContext(WalletContext)
+  const { wallet, settings, updateSettings, updateManagers, managers } = useContext(WalletContext)
   const { pageLoaded } = useContext(UserContext)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const theme = useTheme()
@@ -79,6 +81,9 @@ const Settings = () => {
   const themes = ['light', 'dark', 'system']
   const [selectedTheme, setSelectedTheme] = useState(settings?.theme?.mode || 'system')
   const [selectedCurrency, setSelectedCurrency] = useState(settings?.currency || 'BSV')
+  const [walletStorageUrl, setWalletStorageUrl] = useState('')
+  const [stores, setStores] = useState([])
+  const [progLogStr, setProgLogStr] = useState<string[]>([])
 
   useEffect(() => {
     if (settings?.theme?.mode) {
@@ -133,6 +138,37 @@ const Settings = () => {
       setSettingsLoading(false);
     }
   }
+
+  function progLog(s: string) : string {
+    const lines = s.split('\n');
+    for (const line of lines) {
+      setProgLogStr((prev) => [...prev, line]);
+    }
+    return s
+  }
+
+  const activeStorageUrl = managers?.storageManager?.getStoreEndpointURL(managers?.storageManager?._active) || 'disconnected';
+
+  const handleAddBackup = useCallback(async () => {
+    try {
+      setSettingsLoading(true);
+      // use the set storageURl to add a wallet storage provider to the wallet.managers
+      const storageManager: WalletStorageManager = managers.storageManager;
+      const client = new StorageClient(wallet, walletStorageUrl);
+      await client.makeAvailable();
+      await storageManager.addWalletStorageProvider(client);
+      const stores = storageManager.getStores();
+      await storageManager.setActive(stores[0].storageIdentityKey, progLog)
+      updateManagers({ ...managers, storageManager });
+      setStores(stores);
+      await storageManager.updateBackups(undefined, progLog)
+      toast.success('Backup complete!');
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSettingsLoading(false);  
+    }
+  }, [updateManagers, walletStorageUrl])
 
   const renderThemeIcon = (themeType) => {
     switch (themeType) {
@@ -267,6 +303,49 @@ const Settings = () => {
             </Grid>
           ))}
         </Grid>
+      </Paper>
+
+      <Paper elevation={0} className={classes.section} sx={{ p: 3, bgcolor: 'background.paper' }}>
+        <Typography variant="h4" sx={{ mb: 2 }}>
+          Wallet Storage
+        </Typography>
+        <Typography variant="body1" color="textSecondary">
+          Your wallet data is stored in your primary storage provider:
+        </Typography>
+        <Typography variant="body1" color="textPrimary" sx={{ mb: 3 }}>
+        {activeStorageUrl}
+        </Typography>
+        {/* display the current sotrageURLs configured */}
+        <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+          {stores.filter((_, idx) => idx !== 0).map((provider, index) => (
+            <Typography key={index} variant="body1" color="textSecondary" sx={{ mb: 1 }}>
+              {provider.storageName}
+            </Typography>
+          ))}
+        </Typography>
+        <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+          Add an additional storage provider to backup your wallet data.
+        </Typography>
+        {/* add a text input for a wallet storage URL to add as backup */}
+        <TextField
+          label="Wallet Storage URL"
+          variant="outlined"
+          value={walletStorageUrl}
+          onChange={(e) => setWalletStorageUrl(e.target.value)}
+          fullWidth
+          sx={{ mb: 2 }}
+        />
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleAddBackup}
+          disabled={settingsLoading}
+        >
+          Add
+        </Button>
+        <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+          {progLogStr.join('\n')}
+        </Typography>
       </Paper>
     </div>
   )
