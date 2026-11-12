@@ -35,9 +35,16 @@ import { WalletProfile } from './types/WalletProfile'
 // Context Types
 // -----
 
+export interface ActiveProfile {
+  id: number[];
+  name: string;
+  createdAt: number | null;
+  active: boolean;
+}
 
-interface ManagerState {
+export interface ManagerState {
   walletManager?: WalletAuthenticationManager;
+  storageManager?: WalletStorageManager;
   permissionsManager?: WalletPermissionsManager;
   settingsManager?: WalletSettingsManager;
 }
@@ -78,6 +85,7 @@ export interface WalletContextValue {
   finalizeConfig: (wabConfig: WABConfig) => boolean
   setConfigStatus: (status: ConfigStatus) => void
   configStatus: ConfigStatus
+  wallet: WalletInterface
 }
 
 export const WalletContext = createContext<WalletContextValue>({
@@ -109,7 +117,8 @@ export const WalletContext = createContext<WalletContextValue>({
   recentApps: [],
   finalizeConfig: () => false,
   setConfigStatus: () => { },
-  configStatus: 'initial'
+  configStatus: 'initial',
+  wallet: null,
 })
 
 // ---- Group-gating types ----
@@ -193,6 +202,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
   const [adminOriginator, setAdminOriginator] = useState(ADMIN_ORIGINATOR);
   const [recentApps, setRecentApps] = useState([])
   const [activeProfile, setActiveProfile] = useState<WalletProfile | null>(null)
+  const [wallet, setWallet] = useState<WalletInterface | null>(null)
 
   const { isFocused, onFocusRequested, onFocusRelinquished, setBasketAccessModalOpen, setCertificateAccessModalOpen, setProtocolAccessModalOpen, setSpendingAuthorizationModalOpen, setGroupPermissionModalOpen } = useContext(UserContext);
 
@@ -799,12 +809,15 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
       const signer = new WalletSigner(chain, keyDeriver as any, storageManager);
       const services = new Services(chain);
       const wallet = new Wallet(signer, services, undefined, privilegedKeyManager);
+      setWallet(wallet);
       newManagers.settingsManager = wallet.settingsManager;
 
       // Use user-selected storage provider
       const client = new StorageClient(wallet, selectedStorageUrl);
       await client.makeAvailable();
       await storageManager.addWalletStorageProvider(client);
+
+      newManagers.storageManager = storageManager;
 
       // Setup permissions with provided callbacks.
       const permissionsManager = new WalletPermissionsManager(wallet, adminOriginator, {
@@ -1197,7 +1210,8 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
     recentApps,
     finalizeConfig,
     setConfigStatus,
-    configStatus
+    configStatus,
+    wallet
   }), [
     managers,
     settings,
@@ -1225,6 +1239,7 @@ export const WalletContextProvider: React.FC<WalletContextProps> = ({
     finalizeConfig,
     setConfigStatus,
     configStatus,
+    wallet
   ]);
 
   return (
